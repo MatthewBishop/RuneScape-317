@@ -74,7 +74,7 @@ public class ObjType {
             Image24 icon = iconCache.get(id);
 
             if ((icon != null) && (icon.cropH != amount) && (icon.cropH != -1)) {
-                icon.unlink();
+                iconCache.remove(id);
                 icon = null;
             }
 

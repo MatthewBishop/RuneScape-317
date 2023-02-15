@@ -2,7 +2,7 @@ import java.awt.*;
 import java.awt.image.PixelGrabber;
 import java.io.IOException;
 
-public class Image24 extends DoublyLinkedList.Node {
+public class Image24 {
 
     public int[] pixels;
     public int width;
