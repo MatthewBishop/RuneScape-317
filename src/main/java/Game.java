@@ -14,6 +14,7 @@ import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.URL;
+import java.net.URLConnection;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.zip.CRC32;
@@ -178,7 +179,6 @@ public class Game extends GameShell {
     public final boolean[] cameraModifierEnabled = new boolean[5];
     public final long[] ignoreName37 = new long[100];
     public final int[] cameraModifierWobbleSpeed = new int[5];
-    public final CRC32 crc32 = new CRC32();
     public final int[] messageType = new int[100];
     public final String[] messageSender = new String[100];
     public final String[] messageText = new String[100];
@@ -227,7 +227,6 @@ public class Game extends GameShell {
     public int[] flameBuffer3;
     public int[] flameBuffer2;
     public volatile boolean flameActive = false;
-    public Socket jaggrabSocket;
     public int titleScreenState;
     public Buffer chatBuffer = new Buffer(new byte[5000]);
     public NPCEntity[] npcs = new NPCEntity[16384];
@@ -269,7 +268,6 @@ public class Game extends GameShell {
     public Image8 imageRedstone2hv;
     public Image24 imageMapmarker0;
     public Image24 imageMapmarker1;
-    public boolean jaggrabEnabled = true; // original value: false
     public int lastWaveID = -1;
     public int weightCarried;
     public MouseRecorder mouseRecorder;
@@ -714,7 +712,6 @@ public class Game extends GameShell {
         }
 
         try {
-            loadArchiveChecksums();
 
             archiveTitle = loadArchive(1, "title screen", "title", archiveChecksum[1], 25);
             fontPlain11 = new BitmapFont(archiveTitle, "p11_full", false);
@@ -1324,80 +1321,6 @@ public class Game extends GameShell {
     public void stopMidi() {
         Signlink.midifade = 0;
         Signlink.midi = "stop";
-    }
-
-    public void loadArchiveChecksums() throws IOException {
-        int wait = 5;
-        int retries = 0;
-
-        archiveChecksum[8] = 0;
-
-        while (archiveChecksum[8] == 0) {
-            String s = "Unknown problem";
-            drawProgress(20, "Connecting to web server");
-
-            try {
-                DataInputStream in = openURL("crc" + (int) (Math.random() * 99999999D) + "-" + 317);
-                Buffer buffer = new Buffer(new byte[40]);
-                in.readFully(buffer.data, 0, 40);
-                in.close();
-
-                for (int i = 0; i < 9; i++) {
-                    archiveChecksum[i] = buffer.read32();
-                }
-
-                int expectedChecksum = buffer.read32();
-                int calculatedChecksum = 1234;
-
-                for (int i = 0; i < 9; i++) {
-                    calculatedChecksum = (calculatedChecksum << 1) + archiveChecksum[i];
-                }
-
-                if (expectedChecksum != calculatedChecksum) {
-                    s = "checksum problem";
-                    archiveChecksum[8] = 0;
-                }
-            } catch (EOFException e) {
-                s = "EOF problem";
-                archiveChecksum[8] = 0;
-            } catch (IOException e) {
-                s = "connection problem";
-                archiveChecksum[8] = 0;
-            } catch (Exception e) {
-                s = "logic problem";
-                archiveChecksum[8] = 0;
-
-                if (!Signlink.reporterror) {
-                    return;
-                }
-            }
-
-            if (archiveChecksum[8] == 0) {
-                retries++;
-
-                for (int remaining = wait; remaining > 0; remaining--) {
-                    if (retries >= 10) {
-                        drawProgress(10, "Game updated - please reload page");
-                        remaining = 10;
-                    } else {
-                        drawProgress(10, s + " - Will retry in " + remaining + " secs.");
-                    }
-
-                    try {
-                        Thread.sleep(1000L);
-                    } catch (Exception ignored) {
-                    }
-                }
-
-                wait *= 2;
-
-                if (wait > 60) {
-                    wait = 60;
-                }
-
-                jaggrabEnabled = !jaggrabEnabled;
-            }
-        }
     }
 
     public boolean isAddFriendOption(int option) {
@@ -4581,26 +4504,24 @@ public class Game extends GameShell {
         }
 
         if (data != null) {
-            crc32.reset();
-            crc32.update(data);
-            if ((int) crc32.getValue() != expectedChecksum) {
-                data = null;
-            }
-        }
-
-        if (data != null) {
             return new FileArchive(data);
         }
 
-        int checksumErrors = 0;
         while (data == null) {
             String error = "Unknown error";
             drawProgress(progress, "Requesting " + caption);
 
             try {
+                URL url = new URL("https://archive.openrs2.org/caches/runescape/657/archives/0/groups/"+fileId+".dat");
+
+                URLConnection con = url.openConnection();
+
+                con.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36");
+
                 int lastPercent = 0;
 
-                DataInputStream in = openURL(fileName + expectedChecksum);
+                DataInputStream in = new DataInputStream(con.getInputStream());
+
                 Buffer buffer = new Buffer(new byte[6]);
                 in.readFully(buffer.data, 0, 6);
                 buffer.position = 3;
@@ -4646,18 +4567,6 @@ public class Game extends GameShell {
                 } catch (Exception _ex) {
                     filestores[0] = null;
                 }
-
-                if (data != null) {
-                    crc32.reset();
-                    crc32.update(data);
-                    int calculatedChecksum = (int) crc32.getValue();
-
-                    if (calculatedChecksum != expectedChecksum) {
-                        data = null;
-                        checksumErrors++;
-                        error = "Checksum error: " + calculatedChecksum;
-                    }
-                }
             } catch (IOException ioexception) {
                 if (error.equals("Unknown error")) {
                     error = "Connection error";
@@ -4685,12 +4594,7 @@ public class Game extends GameShell {
 
             if (data == null) {
                 for (int remaining = wait; remaining > 0; remaining--) {
-                    if (checksumErrors >= 3) {
-                        drawProgress(progress, "Game updated - please reload page");
-                        remaining = 10;
-                    } else {
-                        drawProgress(progress, error + " - Retrying in " + remaining);
-                    }
+                    drawProgress(progress, error + " - Retrying in " + remaining);
                     try {
                         Thread.sleep(1000L);
                     } catch (Exception ignored) {
@@ -4700,7 +4604,6 @@ public class Game extends GameShell {
                 if (wait > 60) {
                     wait = 60;
                 }
-                jaggrabEnabled = !jaggrabEnabled;
             }
         }
         return new FileArchive(data);
@@ -10181,27 +10084,7 @@ public class Game extends GameShell {
         }
         return true;
     }
-
-    public DataInputStream openURL(String s) throws IOException {
-        if (!jaggrabEnabled) {
-            return new DataInputStream(new URL(getCodeBase(), s).openStream());
-        }
-
-        if (jaggrabSocket != null) {
-            try {
-                jaggrabSocket.close();
-            } catch (Exception ignored) {
-            }
-            jaggrabSocket = null;
-        }
-        jaggrabSocket = openSocket(43595);
-        jaggrabSocket.setSoTimeout(10000);
-        java.io.InputStream in = jaggrabSocket.getInputStream();
-        OutputStream out = jaggrabSocket.getOutputStream();
-        out.write(("JAGGRAB /" + s + "\n\n").getBytes());
-        return new DataInputStream(in);
-    }
-
+    
     public void drawFlames() {
         int height = 256;
 
